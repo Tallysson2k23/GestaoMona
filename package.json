@@ -1,0 +1,40 @@
+{
+  "name": "gestaomona",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "demo": "node scripts/demo.js",
+    "typecheck": "tsc --project tsconfig.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tallysson2k23/GestaoMona.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Tallysson2k23/GestaoMona/issues"
+  },
+  "homepage": "https://github.com/Tallysson2k23/GestaoMona#readme",
+  "dependencies": {
+    "firebase": "^13.3.0",
+    "firebase-admin": "^14.5.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6"
+  },
+  "private": true
+}
