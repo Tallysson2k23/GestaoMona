@@ -197,8 +197,13 @@ export default async function handler(req, res) {
     const app = firebase();
     const db = getFirestore(app);
     const auth = getAuth(app);
-    const identity = await auth.verifyIdToken(token,true).catch(() => null);
-    ensure(identity,'Sessão inválida ou expirada.',401);
+    const identity = await auth.verifyIdToken(token,true).catch(error => {
+      const code = error.code ?? 'unknown';
+      console.error('Firebase Admin: falha ao verificar sessão', code);
+      const invalidSession = ['auth/argument-error','auth/invalid-id-token','auth/id-token-expired','auth/id-token-revoked','auth/user-disabled','auth/user-not-found'].includes(code);
+      ensure(!invalidSession,'Sessão inválida ou expirada.',401);
+      throw error;
+    });
     const uid = identity.uid;
     const profile = (await db.collection('users').doc(uid).get()).data();
     ensure(profile?.active && ['admin','colaborador'].includes(profile.role),'Conta sem acesso ao GestaoMona.',403);
