@@ -25,7 +25,9 @@ const brand = '<div class="brand"><span>M</span><div>Gestao<strong>Mona</strong>
 async function api(action,data={}) {
   const token = await auth.currentUser.getIdToken();
   const response = await fetch('/api/gestao',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer ' + token},body:JSON.stringify({action,...data})});
-  const result = await response.json();
+  const result = await response.json().catch(() => {
+    throw new Error('A API do GestaoMona retornou uma resposta inesperada (HTTP ' + response.status + '). Consulte os logs da função /api/gestao.');
+  });
   if (!response.ok) throw new Error(result.error);
   return result;
 }
