@@ -4,8 +4,9 @@ import {auth} from './firebase.js';
 import {today} from '../server/domain.js';
 
 const root = document.querySelector('#app');
-const names = {dashboard:'Visão geral',catalog:'Catálogo',stock:'Estoque',production:'Produção',sales:'Vendas internas',reports:'Relatórios',users:'Usuários',audit:'Auditoria'};
-const icons = {dashboard:'▦',catalog:'◇',stock:'▤',production:'⊞',sales:'⇄',reports:'▥',users:'♙',audit:'◷'};
+const names = {dashboard:'Visão geral',catalog:'Produtos',customers:'Clientes',stock:'Estoque',production:'Produção',sales:'Vendas internas',reports:'Relatórios',users:'Usuários',audit:'Auditoria',settings:'Configurações'};
+const icons = {dashboard:'▦',catalog:'◇',stock:'▤',production:'⊞',sales:'⇄',reports:'▥',users:'♙',audit:'◷',settings:'⚙'};
+icons.customers = 'C';
 const types = {producao:'Produção',venda:'Venda',devolucao:'Devolução / estorno',perda:'Perda',ajusteEntrada:'Ajuste de entrada',ajusteSaida:'Ajuste de saída'};
 const months = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const state = {page:'dashboard', products:[], variants:[], filters:{}, busy:false};
@@ -20,13 +21,13 @@ const select = (name,label,options) => '<label>' + esc(label) + '<select name="'
 const button = (label,action,value='') => '<button type="button" class="secondary" data-action="' + action + '" data-value="' + esc(value) + '">' + label + '</button>';
 const table = (head,body) => '<div class="table-wrap"><table><thead><tr>' + head.map(x=>'<th>' + x + '</th>').join('') + '</tr></thead><tbody>' + (body.length ? body.map(row=>'<tr>' + row.map(x=>'<td>' + x + '</td>').join('') + '</tr>').join('') : '<tr><td colspan="' + head.length + '" class="empty">Nenhum registro encontrado.</td></tr>') + '</tbody></table></div>';
 const panel = (title,content) => '<section class="panel"><h2>' + title + '</h2>' + content + '</section>';
-const brand = '<div class="brand"><span>M</span><div>Gestao<strong>Mona</strong><small>Gestão de confecção</small></div></div>';
+const brand = '<div class="brand"><span>MD</span><div>MD <strong>sport fit</strong><small>Gestão de confecção</small></div></div>';
 
 async function api(action,data={}) {
   const token = await auth.currentUser.getIdToken();
   const response = await fetch('/api/gestao',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer ' + token},body:JSON.stringify({action,...data})});
   const result = await response.json().catch(() => {
-    throw new Error('A API do GestaoMona retornou uma resposta inesperada (HTTP ' + response.status + '). Consulte os logs da função /api/gestao.');
+    throw new Error('A API do MD sport fit retornou uma resposta inesperada (HTTP ' + response.status + '). Consulte os logs da função /api/gestao.');
   });
   if (!response.ok) throw new Error(result.error);
   return result;
@@ -79,30 +80,73 @@ function chart(report,compare) {
   }).join('') + '</div><p class="muted">* Mês em andamento ou futuro.' + (compare ? ' Valores na ordem: período selecionado / ' + esc(state.filters.compare) + '.' : '') + '</p>';
 }
 
+const dashboardSections = {
+  metrics:'Produção, vendas e devoluções',
+  finance:'Receita e margem',
+  monthly:'Gráfico de vendas mensais',
+  ranking:'Produtos mais vendidos',
+  sizes:'Vendas por tamanho e cor',
+  value:'Ranking por valor de vendas',
+  low:'Estoque para reposição',
+  recent:'Últimas movimentações',
+  filters:'Filtros de período e produto'
+};
+const financeSections = ['finance','value'];
+const preferenceKey = () => 'mona-dashboard-' + state.profile.uid;
+const createProductButton = () => '<button type="button" data-action="product" data-value="">Cadastrar produto</button>';
+
+function dashboardPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(preferenceKey()));
+    if (Array.isArray(saved)) return saved;
+  } catch {
+    // Use the default when browser storage is unavailable or invalid.
+  }
+  return ['low'];
+}
+
+function settingsView() {
+  const selected = dashboardPreferences();
+  return panel('Visão geral','<p class="muted">Escolha quais informações aparecem na página inicial. As preferências ficam salvas neste navegador para sua conta.</p><form id="dashboard-settings"><div class="dashboard-options">' +
+    Object.entries(dashboardSections).filter(([key])=>admin() || !financeSections.includes(key)).map(([key,label])=>
+      '<label class="check"><input type="checkbox" name="section" value="' + key + '"' + (selected.includes(key)?' checked':'') + '> ' + label + '</label>'
+    ).join('') + '</div><div class="actions"><button>Salvar preferências</button>' + button('Ver visão geral','nav','dashboard') + '</div></form>');
+}
+
 async function dashboard() {
-  const selected = state.filters;
+  const reports = state.page==='reports';
+  const enabled = reports ? Object.keys(dashboardSections) : dashboardPreferences();
+  const show = key => enabled.includes(key) && (admin() || !financeSections.includes(key));
+  const selected = show('filters') ? state.filters : {};
   const end = selected.end || today();
   const year = end.slice(0,4);
   const annual = {...selected,start:year+'-01-01',end:year===today().slice(0,4)?today():year+'-12-31'};
   const compareYear = selected.compare;
-  const reportRequest=api('report',selected);
-  const [report, trend, compare, recent] = await Promise.all([
-    reportRequest, (selected.start || annual.start)===annual.start && end===annual.end ? reportRequest : api('report',annual),
-    compareYear ? api('report',{...selected,start:compareYear+'-01-01',end:compareYear===today().slice(0,4)?today():compareYear+'-12-31'}) : null,
-    api('history',selected)
+  const needsReport = ['metrics','finance','ranking','sizes','value'].some(show);
+  const reportRequest = needsReport ? api('report',selected) : null;
+  const samePeriod = (selected.start || annual.start)===annual.start && end===annual.end;
+  const [report,trend,compare,recent] = await Promise.all([
+    reportRequest,
+    show('monthly') ? (samePeriod && reportRequest ? reportRequest : api('report',annual)) : null,
+    show('monthly') && compareYear ? api('report',{...selected,start:compareYear+'-01-01',end:compareYear===today().slice(0,4)?today():compareYear+'-12-31'}) : null,
+    show('recent') ? api('history',selected) : null
   ]);
-  const low = state.variants.filter(v=>v.active && state.products.some(p=>p.id===v.productId && p.active) && v.stock<=v.minimum && ['productId','category','collection','size','color'].every(k=>!selected[k]||selected[k]===v[k]));
-  const metrics = [['Produzidas',report.produced],['Vendas brutas',report.sold],['Devoluções',report.returned],['Vendas líquidas',report.sold-report.returned]];
-  if (admin()) metrics.push(['Receita líquida',brl(report.revenue)],['Margem conhecida',brl(report.margin)]);
-  return filters() + (state.page==='reports' ? '<div class="actions">' + button('Exportar estoque','csv','stock') + button('Exportar produção','csv','producao') + button('Exportar vendas','csv','sales') + '</div>' : '') +
-    '<div class="metrics">' + metrics.map(([label,value])=>'<article><span>' + label + '</span><strong>' + value + '</strong></article>').join('') + '</div>' +
-    panel('Vendas mensais · ' + year,chart(trend,compare)) +
-    '<div class="columns">' + panel('Mais vendidos',table(['Produto','Unidades líquidas',...(admin()?['Valor líquido']:[])],report.ranking.map(x=>[esc(x.name),x.qty,...(admin()?[brl(x.amount)]:[])]))) +
-    panel('Saída por tamanho e cor',table(['Variação','Unidades líquidas'],report.sizes.map(x=>[esc(x[0]),x[1]]))) + '</div>' +
-    (admin() ? panel('Ranking por valor líquido',table(['Produto','Valor líquido'],[...report.ranking].sort((a,b)=>b.amount-a.amount).map(x=>[esc(x.name),brl(x.amount)]))) : '') +
-    panel('Reposição',stockTable(low)) + panel('Últimas movimentações',historyTable(recent.rows.slice(0,8)));
+  const metrics = [];
+  if (show('metrics')) metrics.push(['Produzidas',report.produced],['Vendas brutas',report.sold],['Devoluções',report.returned],['Vendas líquidas',report.sold-report.returned]);
+  if (show('finance')) metrics.push(['Receita líquida',brl(report.revenue)],['Margem conhecida',brl(report.margin)]);
+  const low = show('low') ? state.variants.filter(v=>v.active && state.products.some(p=>p.id===v.productId && p.active) && v.stock<=v.minimum && ['productId','category','collection','size','color'].every(k=>!selected[k]||selected[k]===v[k])) : [];
+  return (reports
+    ? '<div class="actions">' + button('Exportar estoque','csv','stock') + button('Exportar produção','csv','producao') + button('Exportar vendas','csv','sales') + '</div>'
+    : '<div class="actions">' + (admin()?createProductButton():'') + button('Personalizar visão geral','nav','settings') + '</div>') +
+    (show('filters') ? filters() : '') +
+    (metrics.length ? '<div class="metrics">' + metrics.map(([label,value])=>'<article><span>' + label + '</span><strong>' + value + '</strong></article>').join('') + '</div>' : '') +
+    (show('monthly') ? panel('Vendas mensais · ' + year,chart(trend,compare)) : '') +
+    (show('ranking') ? panel('Mais vendidos',table(['Produto','Unidades líquidas',...(show('finance')?['Valor líquido']:[])],report.ranking.map(x=>[esc(x.name),x.qty,...(show('finance')?[brl(x.amount)]:[])]))) : '') +
+    (show('sizes') ? panel('Saída por tamanho e cor',table(['Variação','Unidades líquidas'],report.sizes.map(x=>[esc(x[0]),x[1]]))) : '') +
+    (show('value') ? panel('Ranking por valor líquido',table(['Produto','Valor líquido'],[...report.ranking].sort((a,b)=>b.amount-a.amount).map(x=>[esc(x.name),brl(x.amount)]))) : '') +
+    (show('low') ? panel('Reposição',low.length?stockTable(low):'<p class="muted">Nenhum produto precisa de reposição.</p>') : '') +
+    (show('recent') ? panel('Últimas movimentações',historyTable(recent.rows.slice(0,8))) : '');
 }
-
 function stockTable(variants) {
   return table(['Produto','SKU','Tamanho','Cor','Saldo','Mínimo','Situação'],variants.map(v=>[
     esc(v.name),esc(v.sku),esc(v.size),esc(v.color),v.stock,v.minimum,
@@ -110,13 +154,46 @@ function stockTable(variants) {
   ]));
 }
 
+
+function customersView(){
+ return '<div class="actions"><button data-action="customer" data-value="">Cadastrar cliente</button></div>'+input('customerSearch','Buscar cliente por nome, CPF/CNPJ, telefone ou e-mail')+'<div id="customer-list">'+customerList('')+'</div><div id="customer-detail"></div>';
+}
+function customerList(search){
+ const term=search.trim().toLocaleLowerCase('pt-BR');
+ return table(['Cliente','CPF/CNPJ','Telefone','E-mail','Status',''],state.customers.filter(c=>[c.name,c.document,c.phone,c.email].some(v=>(v??'').toLocaleLowerCase('pt-BR').includes(term))).map(c=>[esc(c.name),esc(c.document),esc(c.phone),esc(c.email),c.active?'Ativo':'Inativo',button('Abrir cadastro','customer-detail',c.id)]));
+}
+function customerForm(id){
+ const c=state.customers.find(c=>c.id===id)??{};
+ const fields=[['name','Nome / razão social'],['document','CPF / CNPJ'],['email','E-mail'],['phone','Telefone / WhatsApp'],['birthDate','Nascimento'],['postalCode','CEP'],['street','Endereço'],['number','Número'],['complement','Complemento'],['district','Bairro'],['city','Cidade'],['state','UF'],['notes','Observações']];
+ modal(id?'Editar cliente':'Cadastrar cliente','<form id="customer" data-id="'+esc(id)+'" data-new-id="'+crypto.randomUUID()+'"><div class="form-grid">'+fields.map(([key,label])=>input(key,label,c[key],key==='birthDate'?'date':key==='email'?'email':'text',key==='name'?'required maxlength="120"':key==='state'?'maxlength="2"':'')).join('')+select('active','Status',option('true','Ativo',String(c.active!==false))+option('false','Inativo',String(c.active!==false)))+'</div><button>Salvar cliente</button></form>');
+}
+async function customerDetail(id,year=today().slice(0,4)){
+ const customer=state.customers.find(c=>c.id===id);
+ const report=await api('customerHistory',{id,year});
+ state.customerHistory={...report,id,year};
+ const peak=Math.max(0,...report.monthly),max=Math.max(1,...report.monthly.map(Math.abs));
+ const unit=report.measure==='value'?brl:v=>v+' un.';
+ const peaks=months.filter((_,i)=>peak>0&&report.monthly[i]===peak);
+ const graph='<div class="chart">'+months.map((month,i)=>'<div class="month"><div class="bars"><span style="height:'+Math.max(2,Math.abs(report.monthly[i])/max*100)+'%"></span></div><strong>'+unit(report.monthly[i])+'</strong><small>'+month+'</small></div>').join('')+'</div>';
+ document.querySelector('#customer-detail').innerHTML=panel(esc(customer.name),'<div class="actions">'+button('Editar cadastro','customer',id)+'</div>'+table(['Campo','Informação'],[['CPF/CNPJ',esc(customer.document)],['E-mail',esc(customer.email)],['Telefone',esc(customer.phone)],['Nascimento',date(customer.birthDate)],['Endereço',esc([customer.street,customer.number,customer.complement,customer.district,customer.city,customer.state,customer.postalCode].filter(Boolean).join(', '))],['Observações',esc(customer.notes)],['Status',customer.active?'Ativo':'Inativo']]))+panel('Compras por mês','<form id="customer-year" data-id="'+esc(id)+'" class="toolbar">'+input('year','Ano',year,'number','required min="1900" max="'+today().slice(0,4)+'"')+'<button>Consultar</button></form><p>'+report.purchases+' compras · '+report.units+' peças líquidas no ano</p><p>'+(peaks.length?'Maior compra líquida '+(report.measure==='value'?'por valor':'por quantidade')+': '+peaks.join(', ')+' ('+unit(peak)+')':'Sem compras líquidas positivas neste ano.')+'</p>'+graph+'<p class="muted">Devoluções descontadas no mês da devolução. Ano atual inclui meses em andamento e futuros.</p>')+panel('Histórico de compras e devoluções','<div id="customer-history">'+customerHistoryTable()+'</div>');
+}
+function customerHistoryTable(){
+ return historyTable(state.customerHistory.rows)+(state.customerHistory.cursor?button('Carregar mais','customer-more'):'');
+}
+async function customerMore(){
+ const current=state.customerHistory;
+ const page=await api('customerHistory',{id:current.id,year:current.year,cursor:current.cursor});
+ current.rows.push(...page.rows);current.cursor=page.cursor;
+ document.querySelector('#customer-history').innerHTML=customerHistoryTable();
+}
+
 function catalogView() {
-  return '<div class="toolbar">' + input('search','Buscar produto ou SKU') +
+  return (admin()?'<div class="actions">' + createProductButton() + '</div>':'') + '<div class="toolbar">' + input('search','Buscar produto ou SKU') +
     [['category','Categoria'],['collection','Coleção'],['size','Tamanho'],['color','Cor']].map(([key,label])=>
       select(key,label,option('','Todos')+[...new Set(state.variants.map(v=>v[key]).filter(Boolean))].sort().map(x=>option(x,x)).join(''))
     ).join('') +
     select('stockStatus','Estoque',option('','Todos')+option('zero','Zerado')+option('low','Abaixo ou no mínimo')+option('available','Acima do mínimo')) +
-    (admin()?button('Novo produto','product',''):'') + '</div><div id="products">' + productList() + '</div><div id="detail"></div>';
+    '</div><div id="products">' + productList() + '</div><div id="detail"></div>';
 }
 
 function productList(filters={}) {
@@ -218,7 +295,7 @@ function operationForm(type,original) {
   modal(types[type],'<form id="operation" data-type="' + type + '" data-id="' + id + '" data-original="' + esc(original?.id) + '"><div class="form-grid">' +
     input('date','Data comercial',today(),'date','required max="' + today() + '"') +
     input('reference',type==='producao'?'Lote':'Referência','','text',type==='producao'?'required':'') +
-    (type==='venda'?input('channel','Canal'):'') +
+    (type==='venda'?select('customerId','Cliente',option('','Sem cliente identificado')+state.customers.filter(c=>c.active).map(c=>option(c.id,c.name)).join(''))+input('channel','Canal'):'') +
     input('note',['venda','producao'].includes(type)?'Observação / justificativa':'Justificativa','','text',['venda','producao'].includes(type)?'':'required') +
     (original?'<label class="check"><input type="checkbox" name="restock" checked> Peças retornaram ao estoque</label>':'') +
     '</div><h3>Itens</h3><div id="lines">' +
@@ -229,7 +306,7 @@ function operationForm(type,original) {
   if (previous) {
     const pending = JSON.parse(previous);
     const form = document.querySelector('#operation');
-    for (const k of ['date','reference','channel','note']) if (form.elements[k]) form.elements[k].value = pending[k];
+    for (const k of ['date','reference','channel','note','customerId']) if (form.elements[k]) form.elements[k].value = pending[k];
     if (form.elements.restock) form.elements.restock.checked = pending.restock;
     if (!original) document.querySelector('#lines').innerHTML = pending.items.map(()=>operationLine(type)).join('');
     document.querySelectorAll('.operation-line').forEach((line,i)=>{
@@ -279,6 +356,8 @@ async function render() {
     let content;
     switch (state.page) {
       case 'catalog': content=catalogView(); break;
+      case 'customers': content=customersView(); break;
+      case 'settings': content=settingsView(); break;
       case 'dashboard': case 'reports': content=await dashboard(); break;
       case 'stock': case 'sales': case 'production': content=await historyPage(); break;
       case 'users': content=await usersView(); break;
@@ -296,7 +375,7 @@ async function render() {
 const money = value => value == null || value==='' ? null : Math.round(Number(value)*100);
 const dataOf = form => Object.fromEntries(new FormData(form));
 const readLine = line => Object.fromEntries([...line.querySelectorAll('input,select')].map(el=>[el.name,el.value]));
-const refresh = async () => Object.assign(state,await api('catalog'));
+const refresh=async()=>{const [catalog,customers]=await Promise.all([api('catalog'),api('customers')]);Object.assign(state,catalog,{customers});};
 
 root.addEventListener('submit',async event=>{
   event.preventDefault();
@@ -309,7 +388,16 @@ root.addEventListener('submit',async event=>{
   try {
     switch(form.id) {
       case 'login': await signInWithEmailAndPassword(auth,data.email.trim(),data.password).catch(()=>{throw new Error('Não foi possível entrar. Confira o e-mail e a senha.');}); return;
+      case 'dashboard-settings':
+        localStorage.setItem(preferenceKey(),JSON.stringify(new FormData(form).getAll('section')));
+        notice('Preferências salvas.');
+        return;
       case 'filters': state.filters=data; state.cursor=null; await render(); return;
+      case 'customer':
+        await api('saveCustomer',{...data,id:form.dataset.id,newId:form.dataset.newId,active:data.active==='true'});
+        break;
+      case 'customer-year':
+        await customerDetail(form.dataset.id,data.year); return;
       case 'product':
         await api('saveProduct',{...data,id:form.dataset.id,active:data.active==='true',variants:[...form.querySelectorAll('.variant')].map(row=>{
           const v=readLine(row);
@@ -390,7 +478,7 @@ root.addEventListener('click',async event=>{
       }
       case 'logout': await signOut(auth); break;
       case 'detail': await productDetail(value); break;
-      case 'product': productForm(value); break;
+      case 'product': if (admin()) productForm(value); break;
       case 'close': document.querySelector('dialog')?.remove(); break;
       case 'operation': operationForm(value); break;
       case 'return': {
@@ -403,6 +491,9 @@ root.addEventListener('click',async event=>{
       case 'remove': control.closest('.line').remove(); saleTotal(); break;
       case 'cursor': state.cursor=value||null; await render(); break;
       case 'csv': await exportCsv(value); break;
+      case 'customer': customerForm(value); break;
+      case 'customer-detail': await customerDetail(value); break;
+      case 'customer-more': await customerMore(); break;
       case 'user': {
         const u=value?JSON.parse(value):{};
         modal(value?'Editar usuário':'Adicionar usuário','<form id="user">' +
@@ -418,6 +509,7 @@ root.addEventListener('click',async event=>{
 
 root.addEventListener('input',event=>{
   const name=event.target.name;
+  if(name==='customerSearch')document.querySelector('#customer-list').innerHTML=customerList(event.target.value);
   const productTable = document.querySelector('#products');
   if (productTable && event.target.closest('#content > .toolbar')) {
     productTable.innerHTML=productList(readLine(event.target.closest('.toolbar')));
@@ -434,7 +526,7 @@ root.addEventListener('error',event=>{
   }
 },true);
 
-root.innerHTML='<main class="empty">Carregando GestaoMona…</main>';
+root.innerHTML='<main class="empty">Carregando MD sport fit…</main>';
 onAuthStateChanged(auth,async user=>{
   if(!user){state.profile=null;state.page='dashboard';state.filters={};state.cursor=null;login(state.loginError);state.loginError='';return;}
   try {
